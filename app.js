@@ -57,7 +57,7 @@ function applyLang() {
 // ---------- загрузка данных ----------
 
 async function load() {
-  const res = await fetch("data/zones.json");
+  const res = await fetch("data/zones.json", { cache: "no-cache" }); // всегда сверяемся с сервером
   if (!res.ok) throw new Error("load");
   const data = await res.json();
   state.graph = new Graph(data);
