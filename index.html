@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Albion Pathfinder</title>
+  <meta name="description" content="Бесплатный поиск кратчайшего пути между зонами Albion Online с фильтром безопасности.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◆</span>
+      <div>
+        <h1>Albion Pathfinder</h1>
+        <p class="sub">Кратчайший путь между зонами с учётом опасности</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel" aria-label="Поиск маршрута">
+      <form id="route-form" autocomplete="off">
+        <label class="field">
+          <span>Откуда</span>
+          <input id="from" list="zone-list" placeholder="например, Martlock" required>
+        </label>
+
+        <button type="button" id="swap" class="swap" title="Поменять местами" aria-label="Поменять местами">⇅</button>
+
+        <label class="field">
+          <span>Куда</span>
+          <input id="to" list="zone-list" placeholder="например, Fort Sterling" required>
+        </label>
+        <datalist id="zone-list"></datalist>
+
+        <fieldset class="safety">
+          <legend>Через какие зоны можно идти</legend>
+          <label><input type="radio" name="safety" value="blue" checked><i class="dot blue"></i>Только синие</label>
+          <label><input type="radio" name="safety" value="yellow"><i class="dot yellow"></i>+ жёлтые</label>
+          <label><input type="radio" name="safety" value="red"><i class="dot red"></i>+ красные</label>
+          <label><input type="radio" name="safety" value="black"><i class="dot black"></i>Любые, включая чёрные</label>
+        </fieldset>
+
+        <label class="check">
+          <input type="checkbox" id="portals" checked>
+          Использовать порталы королевских городов в Outlands
+        </label>
+
+        <button type="submit" class="go">Найти путь</button>
+      </form>
+
+      <div id="result" class="result" aria-live="polite"></div>
+    </section>
+
+    <section class="map-wrap" aria-label="Карта">
+      <svg id="map" role="img" aria-label="Карта зон Albion Online"></svg>
+      <div class="legend">
+        <span><i class="dot blue"></i>синяя</span>
+        <span><i class="dot yellow"></i>жёлтая</span>
+        <span><i class="dot red"></i>красная</span>
+        <span><i class="dot black"></i>чёрная</span>
+        <span class="hint">Клик по зоне: сначала «откуда», потом «куда»</span>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>Неофициальный фан-проект. Albion Online — торговая марка Sandbox Interactive GmbH; проект с ними не связан.
+      Данные карты: <a href="https://github.com/ao-data/ao-bin-dumps" target="_blank" rel="noopener">ao-bin-dumps</a>,
+      версия <span id="data-version">…</span>. Дороги Авалона и Туманы не учитываются.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
