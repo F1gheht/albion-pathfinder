@@ -1,83 +1,87 @@
-// Albion Pathfinder — поиск кратчайшего пути между зонами Albion Online.
-// Данные: data/zones.json (собирается tools/build_zones.py из ao-bin-dumps).
+// Albion Pathfinder — интерфейс: форма, вывод маршрута, карта, язык.
+// Поиск пути — в pathfinder.js, тексты — в i18n.js.
 
-const LEVELS = ["blue", "yellow", "red", "black"];
-const LEVEL_NAME = { blue: "синие", yellow: "жёлтые", red: "красные", black: "чёрные" };
-const COLOR_RU = { blue: "синяя", yellow: "жёлтая", red: "красная", black: "чёрная" };
+const { LEVELS, Graph } = window.Pathfinder;
+const ARROW = { N: "↑", NE: "↗", E: "→", SE: "↘", S: "↓", SW: "↙", W: "←", NW: "↖" };
 
 const state = {
-  zones: new Map(),      // id -> zone
-  byName: new Map(),     // lower-case name -> id
-  adj: new Map(),        // id -> [{ to, type }]
-  edges: [],
-  route: null,
+  graph: null,
+  byName: new Map(),   // имя в нижнем регистре -> id
+  pairs: [],           // уникальные пары соседних зон для карты
+  result: null,        // последний найденный маршрут
+  lang: "ru",
+  view: "names",       // "names" | "compass"
   pickNext: "from",
 };
 
 const $ = (id) => document.getElementById(id);
+const T = () => window.I18N[state.lang];
+
+// ---------- настройки (язык, вид) в браузере ----------
+
+function loadPrefs() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem("albion-pathfinder") || "{}"); } catch (_) {}
+  const browserRu = (navigator.language || "").toLowerCase().startsWith("ru");
+  state.lang = saved.lang === "en" || saved.lang === "ru" ? saved.lang : browserRu ? "ru" : "en";
+  state.view = saved.view === "compass" ? "compass" : "names";
+}
+
+function savePrefs() {
+  try {
+    localStorage.setItem("albion-pathfinder", JSON.stringify({ lang: state.lang, view: state.view }));
+  } catch (_) {}
+}
+
+// ---------- язык ----------
+
+function applyLang() {
+  const t = T();
+  document.documentElement.lang = state.lang;
+  document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t[el.dataset.i18n]; });
+  document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t[el.dataset.i18nPh]; });
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+    el.title = t[el.dataset.i18nTitle];
+    el.setAttribute("aria-label", t[el.dataset.i18nTitle]);
+  });
+  document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+    el.setAttribute("aria-label", t[el.dataset.i18nAria]);
+  });
+  document.querySelectorAll("[data-lang]").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.lang === state.lang));
+  });
+  updateMapTitles();
+  renderResult();
+}
 
 // ---------- загрузка данных ----------
 
 async function load() {
   const res = await fetch("data/zones.json");
-  if (!res.ok) throw new Error("Не удалось загрузить data/zones.json");
+  if (!res.ok) throw new Error("load");
   const data = await res.json();
+  state.graph = new Graph(data);
 
-  for (const z of data.zones) {
-    state.zones.set(z.id, z);
-    state.byName.set(z.name.toLowerCase(), z.id);
-    state.adj.set(z.id, []);
+  for (const z of data.zones) state.byName.set(z.name.toLowerCase(), z.id);
+  const seen = new Set();
+  for (const [a, b, type] of data.links) {
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    state.pairs.push([a, b, type]);
   }
-  for (const [a, b, type] of data.edges) {
-    state.adj.get(a).push({ to: b, type });
-    state.adj.get(b).push({ to: a, type });
-  }
-  state.edges = data.edges;
 
   $("data-version").textContent = data.version;
-
-  const list = $("zone-list");
-  const names = [...state.zones.values()].map((z) => z.name).sort((x, y) => x.localeCompare(y));
-  list.innerHTML = names.map((n) => `<option value="${escapeHtml(n)}"></option>`).join("");
+  const names = data.zones.map((z) => z.name).sort((x, y) => x.localeCompare(y));
+  $("zone-list").innerHTML = names.map((n) => `<option value="${esc(n)}"></option>`).join("");
 }
 
-// ---------- поиск пути ----------
-
-// Поиск в ширину: все переходы стоят одинаково (1 зона = 1 шаг).
-// Разрешены только зоны не опаснее выбранного уровня. Старт и финиш
-// разрешены всегда — человек может уже стоять в красной зоне.
-function findPath(fromId, toId, maxLevel, usePortals) {
-  const maxIdx = LEVELS.indexOf(maxLevel);
-  const allowed = (id) =>
-    id === fromId || id === toId || LEVELS.indexOf(state.zones.get(id).color) <= maxIdx;
-
-  const prev = new Map([[fromId, null]]);
-  const queue = [fromId];
-  for (let head = 0; head < queue.length; head++) {
-    const u = queue[head];
-    if (u === toId) break;
-    for (const { to, type } of state.adj.get(u)) {
-      if (prev.has(to) || !allowed(to)) continue;
-      if (type === "portal" && !usePortals) continue;
-      prev.set(to, { from: u, type });
-      queue.push(to);
-    }
-  }
-  if (!prev.has(toId)) return null;
-
-  const path = [];
-  for (let cur = toId; cur !== null; ) {
-    const p = prev.get(cur);
-    path.push({ id: cur, via: p ? p.type : null });
-    cur = p ? p.from : null;
-  }
-  return path.reverse();
-}
+const zone = (id) => state.graph.zones.get(id);
 
 function resolveZone(text) {
   const key = text.trim().toLowerCase();
+  if (!key) return null;
   if (state.byName.has(key)) return state.byName.get(key);
-  // мягкий поиск: единственное совпадение по началу или подстроке
   const names = [...state.byName.keys()];
   const starts = names.filter((n) => n.startsWith(key));
   if (starts.length === 1) return state.byName.get(starts[0]);
@@ -86,99 +90,204 @@ function resolveZone(text) {
   return null;
 }
 
-// ---------- вывод результата ----------
+// ---------- поиск ----------
 
-function showRoute() {
-  const out = $("result");
-  const fromId = resolveZone($("from").value);
-  const toId = resolveZone($("to").value);
-  const level = document.querySelector("input[name=safety]:checked").value;
-  const usePortals = $("portals").checked;
+function currentOptions() {
+  return {
+    maxLevel: document.querySelector("input[name=safety]:checked").value,
+    metric: document.querySelector("input[name=metric]:checked").value,
+    portals: $("portals").checked,
+  };
+}
 
-  if (!fromId || !toId) {
-    const bad = !fromId ? $("from").value : $("to").value;
-    out.innerHTML = `<div class="warn">Зона «${escapeHtml(bad)}» не найдена. Выберите название из списка.</div>`;
+function search() {
+  const fromText = $("from").value, toText = $("to").value;
+  const from = resolveZone(fromText), to = resolveZone(toText);
+  const opt = currentOptions();
+
+  if (!from || !to) {
+    state.result = { kind: "notFound", query: !from ? fromText : toText };
     setRoute(null);
+    renderResult();
     return;
   }
-  $("from").value = state.zones.get(fromId).name;
-  $("to").value = state.zones.get(toId).name;
-  writeHash(fromId, toId, level, usePortals);
+  $("from").value = zone(from).name;
+  $("to").value = zone(to).name;
+  writeHash(from, to, opt);
 
-  if (fromId === toId) {
-    out.innerHTML = `<div class="summary">Вы уже на месте 🙂</div>`;
-    setRoute([{ id: fromId, via: null }]);
-    return;
-  }
-
-  const path = findPath(fromId, toId, level, usePortals);
-  if (!path) {
-    // подсказка: с каким минимальным уровнем путь появится
-    let hint = "";
-    for (const lv of LEVELS.slice(LEVELS.indexOf(level) + 1)) {
-      const p = findPath(fromId, toId, lv, usePortals);
-      if (p) {
-        hint = ` Путь есть, если разрешить зоны до уровня «${LEVEL_NAME[lv]}» (${p.length - 1} переходов).`;
-        break;
-      }
+  const path = state.graph.findPath(from, to, opt);
+  if (path) {
+    state.result = { kind: "route", from, to, opt, path };
+    setRoute(path.steps.map((s) => s.zone));
+  } else {
+    // с каким минимальным уровнем опасности путь появится
+    let hint = null;
+    for (const lv of LEVELS.slice(LEVELS.indexOf(opt.maxLevel) + 1)) {
+      const p = state.graph.findPath(from, to, Object.assign({}, opt, { maxLevel: lv }));
+      if (p) { hint = { level: lv, hops: p.hops }; break; }
     }
-    out.innerHTML = `<div class="warn">Через ${describeLevel(level)} зоны пути нет.${hint}</div>`;
+    state.result = { kind: "noPath", opt, hint };
     setRoute(null);
+  }
+  renderResult();
+}
+
+// ---------- вывод маршрута ----------
+
+function renderResult() {
+  const out = $("result");
+  const r = state.result;
+  const t = T();
+  if (!r) { out.innerHTML = ""; return; }
+
+  if (r.kind === "notFound") {
+    out.innerHTML = `<div class="warn">${t.notFound(esc(r.query))}</div>`;
+    return;
+  }
+  if (r.kind === "pick") {
+    out.innerHTML = `<div class="summary">${t.pickTo(esc(zone(r.from).name))}</div>`;
+    return;
+  }
+  if (r.kind === "noPath") {
+    const levels = LEVELS.slice(0, LEVELS.indexOf(r.opt.maxLevel) + 1).map((l) => t.levelName[l]).join(t.levelsJoin);
+    const hint = r.hint ? t.hintLevel(t.levelName[r.hint.level], r.hint.hops) : "";
+    out.innerHTML = `<div class="warn">${t.noPath(levels)}${hint}</div>`;
     return;
   }
 
-  const jumps = path.length - 1;
-  const danger = worstColor(path.slice(1, -1).map((s) => s.id));
-  const endsWarn = [fromId, toId]
-    .map((id) => state.zones.get(id))
-    .filter((z) => LEVELS.indexOf(z.color) > LEVELS.indexOf(level));
-
-  let html = `<div class="summary">Переходов: <b>${jumps}</b> · зон на пути: <b>${path.length}</b>`;
-  if (danger) html += ` · самая опасная: <b>${COLOR_RU[danger]}</b>`;
-  html += `</div>`;
-  if (endsWarn.length) {
-    html += `<div class="warn">Внимание: ${endsWarn
-      .map((z) => `«${escapeHtml(z.name)}» — ${COLOR_RU[z.color]} зона`)
-      .join(", ")}. Старт и финиш учитываются всегда.</div>`;
+  const { path, opt, from, to } = r;
+  if (path.hops === 0) {
+    out.innerHTML = `<div class="summary">${t.already}</div>`;
+    return;
   }
-  html += `<ol class="steps">${path
+
+  const inner = path.steps.slice(1, -1).map((s) => LEVELS.indexOf(zone(s.zone).color));
+  const worst = inner.length ? LEVELS[Math.max(...inner)] : null;
+  const endsWarn = [from, to].map(zone).filter((z) => LEVELS.indexOf(z.color) > LEVELS.indexOf(opt.maxLevel));
+
+  let html = `<div class="summary">${t.hops}: <b>${path.hops}</b> · ${t.zonesOnPath}: <b>${path.steps.length}</b>`;
+  if (worst) html += ` · ${t.worst}: <b>${t.colorName[worst]}</b>`;
+  html += `<br><span class="muted">${t.distance} ${fmtNum(path.distance)} ${t.distUnit}</span></div>`;
+  if (endsWarn.length) {
+    html += `<div class="warn">${t.endsWarn(endsWarn.map((z) => t.zoneIs(esc(z.name), t.colorName[z.color])).join(", "))}</div>`;
+  }
+
+  html += `<div class="route-bar">
+    <div class="seg" role="group">
+      <button type="button" data-view="names" aria-pressed="${state.view === "names"}">${t.viewNames}</button>
+      <button type="button" data-view="compass" aria-pressed="${state.view === "compass"}">${t.viewCompass}</button>
+    </div>
+    <button type="button" class="copy" id="copy">${t.copy}</button>
+  </div>`;
+
+  html += state.view === "compass" ? renderCompass(path) : renderNames(path);
+  out.innerHTML = html;
+
+  out.querySelectorAll("[data-view]").forEach((b) =>
+    b.addEventListener("click", () => {
+      state.view = b.dataset.view;
+      savePrefs();
+      renderResult();
+    })
+  );
+  $("copy").addEventListener("click", copyRoute);
+}
+
+function zoneMeta(z) {
+  const t = T();
+  if (z.kind === "city") return t.city;
+  return z.tier ? `T${z.tier}` : "";
+}
+
+function renderNames(path) {
+  const t = T();
+  return `<ol class="steps">${path.steps
     .map((s) => {
-      const z = state.zones.get(s.id);
-      const portal = s.via === "portal" ? `<span class="portal">через портал</span>` : "";
-      const tier = z.tier && z.kind !== "city" ? `T${z.tier}` : z.kind === "city" ? "город" : "";
-      return `<li><i class="dot ${z.color}" title="${COLOR_RU[z.color]}"></i>${escapeHtml(z.name)} ${portal}<span class="meta">${tier}</span></li>`;
+      const z = zone(s.zone);
+      const portal = s.link && s.link.type === "portal" ? `<span class="portal">${t.viaPortal}</span>` : "";
+      return `<li><i class="dot ${z.color}" title="${t.colorName[z.color]}"></i>${esc(z.name)} ${portal}<span class="meta">${zoneMeta(z)}</span></li>`;
     })
     .join("")}</ol>`;
-  out.innerHTML = html;
-  setRoute(path);
 }
 
-function worstColor(ids) {
-  let worst = -1;
-  for (const id of ids) worst = Math.max(worst, LEVELS.indexOf(state.zones.get(id).color));
-  return worst >= 0 ? LEVELS[worst] : null;
+// По сторонам света: для каждой зоны — в какую сторону идти к выходу.
+// Выход из зоны steps[i] — это переход, которым вошли в steps[i + 1].
+function renderCompass(path) {
+  const t = T();
+  const rows = path.steps.map((s, i) => {
+    const z = zone(s.zone);
+    const next = path.steps[i + 1];
+    let dir;
+    if (!next) {
+      dir = `<span class="dir finish">⚑ ${t.arrive}</span>`;
+    } else if (next.link.type === "portal") {
+      dir = `<span class="dir portal">◎ ${t.takePortal}</span>`;
+    } else {
+      const d = next.link.dir;
+      dir = `<span class="dir" title="${t.dirLong[d]}"><b class="arrow">${ARROW[d]}</b>${t.dir[d]}</span>`;
+    }
+    return `<li>${dir}<span class="zname"><i class="dot ${z.color}"></i>${esc(z.name)}</span><span class="meta">${zoneMeta(z)}</span></li>`;
+  });
+  return `<ol class="steps compass">${rows.join("")}</ol><p class="note">${t.compassNote}</p>`;
 }
 
-function describeLevel(level) {
-  return LEVELS.slice(0, LEVELS.indexOf(level) + 1).map((l) => LEVEL_NAME[l]).join(" и ");
+function routeText() {
+  const r = state.result;
+  if (!r || r.kind !== "route") return "";
+  const t = T();
+  const steps = r.path.steps;
+  if (state.view === "names") return steps.map((s) => zone(s.zone).name).join(" → ");
+  return steps
+    .map((s, i) => {
+      const next = steps[i + 1];
+      const name = zone(s.zone).name;
+      if (!next) return `${name} (${t.arrive})`;
+      if (next.link.type === "portal") return `${name}: ${t.takePortal}`;
+      return `${name}: ${t.dir[next.link.dir]}`;
+    })
+    .join(" → ");
 }
 
-// ---------- ссылка на маршрут (#from=...&to=...) ----------
+async function copyRoute() {
+  const btn = $("copy");
+  try {
+    await navigator.clipboard.writeText(routeText());
+    btn.textContent = T().copied;
+    setTimeout(() => { if (btn.isConnected) btn.textContent = T().copy; }, 1500);
+  } catch (_) {
+    // запасной вариант для старых браузеров
+    const ta = document.createElement("textarea");
+    ta.value = routeText();
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); btn.textContent = T().copied; } catch (_) {}
+    ta.remove();
+  }
+}
 
-function writeHash(fromId, toId, level, portals) {
-  const p = new URLSearchParams({ from: fromId, to: toId, s: level, p: portals ? "1" : "0" });
+function fmtNum(n) {
+  return new Intl.NumberFormat(state.lang === "ru" ? "ru-RU" : "en-US").format(Math.round(n / 10) * 10);
+}
+
+// ---------- ссылка на маршрут ----------
+
+function writeHash(from, to, opt) {
+  const p = new URLSearchParams({
+    from, to, s: opt.maxLevel, m: opt.metric, p: opt.portals ? "1" : "0",
+  });
   history.replaceState(null, "", "#" + p.toString());
 }
 
 function readHash() {
   const p = new URLSearchParams(location.hash.slice(1));
-  const from = state.zones.get(p.get("from"));
-  const to = state.zones.get(p.get("to"));
+  const from = zone(p.get("from")), to = zone(p.get("to"));
   if (!from || !to) return false;
   $("from").value = from.name;
   $("to").value = to.name;
   const s = p.get("s");
   if (LEVELS.includes(s)) document.querySelector(`input[name=safety][value=${s}]`).checked = true;
+  const m = p.get("m");
+  if (m === "hops" || m === "distance") document.querySelector(`input[name=metric][value=${m}]`).checked = true;
   $("portals").checked = p.get("p") !== "0";
   return true;
 }
@@ -186,7 +295,10 @@ function readHash() {
 // ---------- карта ----------
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const view = { x: 0, y: 0, w: 0, h: 0, full: null };
+const view = { x: 0, y: 0, w: 0, h: 0, full: null, dragged: false };
+// В данных игры y растёт на север, в SVG — вниз, поэтому переворачиваем.
+const px = (z) => z.x;
+const py = (z) => -z.y;
 
 function el(tag, attrs, parent) {
   const e = document.createElementNS(SVG_NS, tag);
@@ -195,28 +307,22 @@ function el(tag, attrs, parent) {
   return e;
 }
 
-// В данных игры y растёт на север, в SVG — вниз, поэтому переворачиваем.
-const px = (z) => z.x;
-const py = (z) => -z.y;
-
 function drawMap() {
   const svg = $("map");
   svg.innerHTML = "";
-  const zones = [...state.zones.values()];
-  const xs = zones.map(px), ys = zones.map(py);
+  const zones = [...state.graph.zones.values()];
   const pad = 15;
-  const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad;
-  const minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad;
-  view.full = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  const xs = zones.map(px), ys = zones.map(py);
+  const minX = Math.min(...xs) - pad, minY = Math.min(...ys) - pad;
+  view.full = { x: minX, y: minY, w: Math.max(...xs) + pad - minX, h: Math.max(...ys) + pad - minY };
   Object.assign(view, view.full);
   applyView();
 
   const gEdges = el("g", {}, svg);
-  for (const [a, b, type] of state.edges) {
-    const za = state.zones.get(a), zb = state.zones.get(b);
+  for (const [a, b, type] of state.pairs) {
+    const za = zone(a), zb = zone(b);
     el("line", { x1: px(za), y1: py(za), x2: px(zb), y2: py(zb), class: "edge " + type }, gEdges);
   }
-
   el("g", { id: "route-layer" }, svg);
 
   const gZones = el("g", { id: "zone-layer" }, svg);
@@ -229,62 +335,69 @@ function drawMap() {
       class: "zone " + z.kind,
       "data-id": z.id,
     }, gZones);
-    const t = el("title", {}, c);
-    t.textContent = `${z.name} — ${COLOR_RU[z.color]}${z.tier && z.kind !== "city" ? ", T" + z.tier : ""}`;
+    el("title", {}, c);
   }
 
   const gLabels = el("g", {}, svg);
-  for (const z of zones.filter((z) => z.kind === "city" && z.color !== "black" || z.name.endsWith("Portal"))) {
-    const t = el("text", { x: px(z) + 5, y: py(z) + 2.5, class: "label" }, gLabels);
-    t.textContent = z.name;
+  for (const z of zones) {
+    if (!(z.kind === "city" && z.color !== "black") && !z.name.endsWith("Portal")) continue;
+    el("text", { x: px(z) + 5, y: py(z) + 2.5, class: "label" }, gLabels).textContent = z.name;
   }
 
   svg.addEventListener("click", (e) => {
     if (view.dragged) return;
     const id = e.target.getAttribute && e.target.getAttribute("data-id");
     if (!id) return;
-    const name = state.zones.get(id).name;
     if (state.pickNext === "from") {
-      $("from").value = name;
+      $("from").value = zone(id).name;
       $("to").value = "";
       state.pickNext = "to";
-      $("result").innerHTML = `<div class="summary">Откуда: <b>${escapeHtml(name)}</b>. Теперь выберите, куда.</div>`;
-      setRoute([{ id, via: null }]);
+      state.result = { kind: "pick", from: id };
+      setRoute([id]);
+      renderResult();
     } else {
-      $("to").value = name;
+      $("to").value = zone(id).name;
       state.pickNext = "from";
-      showRoute();
+      search();
     }
   });
 
   enablePanZoom(svg);
+  updateMapTitles();
 }
 
-function setRoute(path) {
-  state.route = path;
+function updateMapTitles() {
+  if (!state.graph) return;
+  const t = T();
+  document.querySelectorAll("#zone-layer .zone").forEach((c) => {
+    const z = zone(c.getAttribute("data-id"));
+    const tier = z.tier && z.kind !== "city" ? `, T${z.tier}` : "";
+    c.firstChild.textContent = `${z.name} — ${t.colorName[z.color]}${tier}`;
+  });
+}
+
+function setRoute(ids) {
   const layer = $("route-layer");
   layer.innerHTML = "";
-  const onRoute = new Set(path ? path.map((s) => s.id) : []);
+  const onRoute = new Set(ids || []);
   document.querySelectorAll("#zone-layer .zone").forEach((c) => {
-    c.classList.toggle("dim", !!path && path.length > 1 && !onRoute.has(c.getAttribute("data-id")));
+    c.classList.toggle("dim", !!ids && ids.length > 1 && !onRoute.has(c.getAttribute("data-id")));
   });
-  if (!path) return;
-  const pts = path.map((s) => state.zones.get(s.id)).map((z) => `${px(z)},${py(z)}`).join(" ");
-  if (path.length > 1) el("polyline", { points: pts, class: "route" }, layer);
-  for (const s of [path[0], path[path.length - 1]]) {
-    const z = state.zones.get(s.id);
-    el("circle", { cx: px(z), cy: py(z), r: 5, class: "route-node" }, layer);
-  }
-  if (path.length > 1) fitTo(path.map((s) => state.zones.get(s.id)));
+  if (!ids) return;
+  const zs = ids.map(zone);
+  if (zs.length > 1) el("polyline", { points: zs.map((z) => `${px(z)},${py(z)}`).join(" "), class: "route" }, layer);
+  for (const z of [zs[0], zs[zs.length - 1]]) el("circle", { cx: px(z), cy: py(z), r: 5, class: "route-node" }, layer);
+  if (zs.length > 1) fitTo(zs);
 }
 
-// Приближаем карту к маршруту
-function fitTo(zones) {
-  const xs = zones.map(px), ys = zones.map(py);
+function fitTo(zs) {
   const pad = 25;
+  const xs = zs.map(px), ys = zs.map(py);
   let x = Math.min(...xs) - pad, y = Math.min(...ys) - pad;
   let w = Math.max(...xs) - x + pad, h = Math.max(...ys) - y + pad;
-  const ratio = view.full.w / view.full.h;
+  // подгоняем под пропорции самого окна карты, а не всей карты мира
+  const r = $("map").getBoundingClientRect();
+  const ratio = r.width && r.height ? r.width / r.height : view.full.w / view.full.h;
   if (w / h < ratio) { const nw = h * ratio; x -= (nw - w) / 2; w = nw; }
   else { const nh = w / ratio; y -= (nh - h) / 2; h = nh; }
   Object.assign(view, { x, y, w, h });
@@ -292,39 +405,36 @@ function fitTo(zones) {
 }
 
 function applyView() {
-  $("map").setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+  const svg = $("map");
+  svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+  // подписи и линия маршрута остаются одного размера на экране при любом зуме
+  if (view.full) svg.style.setProperty("--k", Math.max(view.w / view.full.w, 0.08).toFixed(3));
 }
 
 function enablePanZoom(svg) {
-  const toSvg = (clientX, clientY) => {
+  const toSvg = (cx, cy) => {
     const r = svg.getBoundingClientRect();
-    // учитываем preserveAspectRatio="xMidYMid meet"
     const scale = Math.max(view.w / r.width, view.h / r.height);
-    const offX = (r.width * scale - view.w) / 2;
-    const offY = (r.height * scale - view.h) / 2;
-    return { x: view.x - offX + (clientX - r.left) * scale, y: view.y - offY + (clientY - r.top) * scale, scale };
+    const offX = (r.width * scale - view.w) / 2, offY = (r.height * scale - view.h) / 2;
+    return { x: view.x - offX + (cx - r.left) * scale, y: view.y - offY + (cy - r.top) * scale, scale };
   };
-
-  svg.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    const k = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-    zoomAt(e.clientX, e.clientY, k);
-  }, { passive: false });
-
   function zoomAt(cx, cy, k) {
     const p = toSvg(cx, cy);
     const w = Math.min(view.full.w * 1.5, Math.max(40, view.w * k));
-    const realK = w / view.w;
-    view.x = p.x - (p.x - view.x) * realK;
-    view.y = p.y - (p.y - view.y) * realK;
+    const kk = w / view.w;
+    view.x = p.x - (p.x - view.x) * kk;
+    view.y = p.y - (p.y - view.y) * kk;
     view.w = w;
-    view.h = view.h * realK;
+    view.h *= kk;
     applyView();
   }
+  svg.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    zoomAt(e.clientX, e.clientY, e.deltaY > 0 ? 1.15 : 1 / 1.15);
+  }, { passive: false });
 
-  // перетаскивание мышью/пальцем + щипок двумя пальцами
   const pointers = new Map();
-  let last = null, pinchDist = null;
+  let last = null, pinch = null;
   svg.addEventListener("pointerdown", (e) => {
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     last = { x: e.clientX, y: e.clientY };
@@ -336,8 +446,8 @@ function enablePanZoom(svg) {
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (pinchDist) zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, pinchDist / d);
-      pinchDist = d;
+      if (pinch) zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, pinch / d);
+      pinch = d;
       view.dragged = true;
       return;
     }
@@ -352,10 +462,7 @@ function enablePanZoom(svg) {
     }
     last = { x: e.clientX, y: e.clientY };
   });
-  const end = (e) => {
-    pointers.delete(e.pointerId);
-    if (pointers.size < 2) pinchDist = null;
-  };
+  const end = (e) => { pointers.delete(e.pointerId); if (pointers.size < 2) pinch = null; };
   svg.addEventListener("pointerup", end);
   svg.addEventListener("pointercancel", end);
   svg.addEventListener("dblclick", () => { Object.assign(view, view.full); applyView(); });
@@ -363,24 +470,34 @@ function enablePanZoom(svg) {
 
 // ---------- утилиты и запуск ----------
 
-function escapeHtml(s) {
+function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-$("route-form").addEventListener("submit", (e) => { e.preventDefault(); showRoute(); });
+loadPrefs();
+applyLang();
+
+document.querySelectorAll("[data-lang]").forEach((b) =>
+  b.addEventListener("click", () => {
+    state.lang = b.dataset.lang;
+    savePrefs();
+    applyLang();
+  })
+);
+$("route-form").addEventListener("submit", (e) => { e.preventDefault(); search(); });
 $("swap").addEventListener("click", () => {
   [$("from").value, $("to").value] = [$("to").value, $("from").value];
-  if ($("from").value && $("to").value) showRoute();
+  if ($("from").value && $("to").value) search();
 });
-document.querySelectorAll("input[name=safety], #portals").forEach((i) =>
-  i.addEventListener("change", () => { if ($("from").value && $("to").value) showRoute(); })
+document.querySelectorAll("input[name=safety], input[name=metric], #portals").forEach((i) =>
+  i.addEventListener("change", () => { if ($("from").value && $("to").value) search(); })
 );
 
 load()
   .then(() => {
     drawMap();
-    if (readHash()) showRoute();
+    if (readHash()) search();
   })
-  .catch((err) => {
-    $("result").innerHTML = `<div class="warn">${escapeHtml(err.message)}. Если вы открыли файл напрямую, запустите локальный сервер (см. README).</div>`;
+  .catch(() => {
+    $("result").innerHTML = `<div class="warn">${T().loadError}</div>`;
   });

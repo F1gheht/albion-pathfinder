@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Albion Pathfinder</title>
-  <meta name="description" content="Бесплатный поиск кратчайшего пути между зонами Albion Online с фильтром безопасности.">
+  <meta name="description" content="Free shortest-path finder between Albion Online zones with a safety filter. Бесплатный поиск кратчайшего пути между зонами Albion Online.">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -13,64 +13,76 @@
       <span class="logo" aria-hidden="true">◆</span>
       <div>
         <h1>Albion Pathfinder</h1>
-        <p class="sub">Кратчайший путь между зонами с учётом опасности</p>
+        <p class="sub" data-i18n="subtitle"></p>
       </div>
+    </div>
+    <div class="seg lang" role="group" aria-label="Language">
+      <button type="button" data-lang="ru">RU</button>
+      <button type="button" data-lang="en">EN</button>
     </div>
   </header>
 
   <main class="layout">
-    <section class="panel" aria-label="Поиск маршрута">
+    <section class="panel">
       <form id="route-form" autocomplete="off">
         <label class="field">
-          <span>Откуда</span>
-          <input id="from" list="zone-list" placeholder="например, Martlock" required>
+          <span data-i18n="from"></span>
+          <input id="from" list="zone-list" data-i18n-ph="fromPh" required>
         </label>
 
-        <button type="button" id="swap" class="swap" title="Поменять местами" aria-label="Поменять местами">⇅</button>
+        <button type="button" id="swap" class="swap" data-i18n-title="swap">⇅</button>
 
         <label class="field">
-          <span>Куда</span>
-          <input id="to" list="zone-list" placeholder="например, Fort Sterling" required>
+          <span data-i18n="to"></span>
+          <input id="to" list="zone-list" data-i18n-ph="toPh" required>
         </label>
         <datalist id="zone-list"></datalist>
 
-        <fieldset class="safety">
-          <legend>Через какие зоны можно идти</legend>
-          <label><input type="radio" name="safety" value="blue" checked><i class="dot blue"></i>Только синие</label>
-          <label><input type="radio" name="safety" value="yellow"><i class="dot yellow"></i>+ жёлтые</label>
-          <label><input type="radio" name="safety" value="red"><i class="dot red"></i>+ красные</label>
-          <label><input type="radio" name="safety" value="black"><i class="dot black"></i>Любые, включая чёрные</label>
+        <fieldset class="box">
+          <legend data-i18n="safetyTitle"></legend>
+          <label><input type="radio" name="safety" value="blue" checked><i class="dot blue"></i><span data-i18n="safeBlue"></span></label>
+          <label><input type="radio" name="safety" value="yellow"><i class="dot yellow"></i><span data-i18n="safeYellow"></span></label>
+          <label><input type="radio" name="safety" value="red"><i class="dot red"></i><span data-i18n="safeRed"></span></label>
+          <label><input type="radio" name="safety" value="black"><i class="dot black"></i><span data-i18n="safeBlack"></span></label>
+        </fieldset>
+
+        <fieldset class="box">
+          <legend data-i18n="metricTitle"></legend>
+          <label><input type="radio" name="metric" value="hops" checked><span data-i18n="metricHops"></span></label>
+          <label><input type="radio" name="metric" value="distance"><span data-i18n="metricDist"></span></label>
         </fieldset>
 
         <label class="check">
           <input type="checkbox" id="portals" checked>
-          Использовать порталы королевских городов в Outlands
+          <span data-i18n="portals"></span>
         </label>
 
-        <button type="submit" class="go">Найти путь</button>
+        <button type="submit" class="go" data-i18n="find"></button>
       </form>
 
       <div id="result" class="result" aria-live="polite"></div>
     </section>
 
-    <section class="map-wrap" aria-label="Карта">
-      <svg id="map" role="img" aria-label="Карта зон Albion Online"></svg>
+    <section class="map-wrap">
+      <svg id="map" role="img" data-i18n-aria="mapAria"></svg>
       <div class="legend">
-        <span><i class="dot blue"></i>синяя</span>
-        <span><i class="dot yellow"></i>жёлтая</span>
-        <span><i class="dot red"></i>красная</span>
-        <span><i class="dot black"></i>чёрная</span>
-        <span class="hint">Клик по зоне: сначала «откуда», потом «куда»</span>
+        <span><i class="dot blue"></i><span data-i18n="cBlue"></span></span>
+        <span><i class="dot yellow"></i><span data-i18n="cYellow"></span></span>
+        <span><i class="dot red"></i><span data-i18n="cRed"></span></span>
+        <span><i class="dot black"></i><span data-i18n="cBlack"></span></span>
+        <span class="hint" data-i18n="mapHint"></span>
       </div>
     </section>
   </main>
 
   <footer class="foot">
-    <p>Неофициальный фан-проект. Albion Online — торговая марка Sandbox Interactive GmbH; проект с ними не связан.
-      Данные карты: <a href="https://github.com/ao-data/ao-bin-dumps" target="_blank" rel="noopener">ao-bin-dumps</a>,
-      версия <span id="data-version">…</span>. Дороги Авалона и Туманы не учитываются.</p>
+    <p><span data-i18n="disclaimer"></span>
+      <span data-i18n="dataFrom"></span> <a href="https://github.com/ao-data/ao-bin-dumps" target="_blank" rel="noopener">ao-bin-dumps</a>,
+      <span data-i18n="version"></span> <span id="data-version">…</span>. <span data-i18n="notIncluded"></span></p>
   </footer>
 
+  <script src="pathfinder.js"></script>
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
