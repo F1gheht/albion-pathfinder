@@ -2,6 +2,27 @@
 // Поиск пути — в pathfinder.js, тексты — в i18n.js.
 
 const { LEVELS, Graph } = window.Pathfinder;
+// Цвета королевских городов, как в игре. Портальные города в Outlands
+// получают цвет своего королевского города обводкой.
+const CITY_COLOR = {
+  "Thetford": "#9b6bd6",
+  "Lymhurst": "#5fb85a",
+  "Bridgewatch": "#e8892b",
+  "Martlock": "#4a8fe0",
+  "Fort Sterling": "#e9e6df",
+  "Caerleon": "#d0453a",
+};
+const cityColor = (z) => (z.kind === "city" ? CITY_COLOR[z.name.replace(/ Portal$/, "")] || null : null);
+
+// Кружок зоны в списке: у городов — цвет города, иначе цвет опасности
+function dotHtml(z, title) {
+  const c = cityColor(z);
+  if (!c) return `<i class="dot ${z.color}" title="${title}"></i>`;
+  const portal = z.name.endsWith(" Portal");
+  const style = portal ? `box-shadow:0 0 0 2px ${c}` : `background:${c}`;
+  return `<i class="dot ${z.color} city-dot" style="${style}" title="${title}"></i>`;
+}
+
 const ARROW = { N: "↑", NE: "↗", E: "→", SE: "↘", S: "↓", SW: "↙", W: "←", NW: "↖" };
 
 const state = {
@@ -205,7 +226,7 @@ function renderNames(path) {
     .map((s) => {
       const z = zone(s.zone);
       const portal = s.link && s.link.type === "portal" ? `<span class="portal">${t.viaPortal}</span>` : "";
-      return `<li><i class="dot ${z.color}" title="${t.colorName[z.color]}"></i>${esc(z.name)} ${portal}<span class="meta">${zoneMeta(z)}</span></li>`;
+      return `<li>${dotHtml(z, t.colorName[z.color])}${esc(z.name)} ${portal}<span class="meta">${zoneMeta(z)}</span></li>`;
     })
     .join("")}</ol>`;
 }
@@ -226,7 +247,7 @@ function renderCompass(path) {
       const d = next.link.dir;
       dir = `<span class="dir" title="${t.dirLong[d]}"><b class="arrow">${ARROW[d]}</b>${t.dir[d]}</span>`;
     }
-    return `<li>${dir}<span class="zname"><i class="dot ${z.color}"></i>${esc(z.name)}</span><span class="meta">${zoneMeta(z)}</span></li>`;
+    return `<li>${dir}<span class="zname">${dotHtml(z, t.colorName[z.color])}${esc(z.name)}</span><span class="meta">${zoneMeta(z)}</span></li>`;
   });
   return `<ol class="steps compass">${rows.join("")}</ol><p class="note">${t.compassNote}</p>`;
 }
@@ -335,13 +356,21 @@ function drawMap() {
       class: "zone " + z.kind,
       "data-id": z.id,
     }, gZones);
+    const cc = cityColor(z);
+    if (cc) {
+      // королевский город — заливка его цветом; портальный город — цветная обводка
+      if (z.name.endsWith(" Portal")) { c.style.stroke = cc; c.classList.add("portal-city"); }
+      else c.style.fill = cc;
+    }
     el("title", {}, c);
   }
 
   const gLabels = el("g", {}, svg);
   for (const z of zones) {
     if (!(z.kind === "city" && z.color !== "black") && !z.name.endsWith("Portal")) continue;
-    el("text", { x: px(z) + 5, y: py(z) + 2.5, class: "label" }, gLabels).textContent = z.name;
+    const lbl = el("text", { x: px(z) + 5, y: py(z) + 2.5, class: "label" }, gLabels);
+    lbl.textContent = z.name;
+    if (cityColor(z)) lbl.style.fill = cityColor(z);
   }
 
   svg.addEventListener("click", (e) => {

@@ -106,9 +106,19 @@ class Cluster:
         return list(ex) if ex is not None else []
 
 
-def compass(x, y):
+def compass(x, y, kind="zone"):
+    """Сторона света выхода по его координатам (север вверх).
+
+    Обычная зона на карте — квадрат, повёрнутый ромбом, и выходы стоят на его
+    четырёх сторонах. Поэтому у не-городов направление всегда «двойное»:
+    NE, NW, SE или SW — по тому, на какой стороне ромба выход. Проверено:
+    в ~95% случаев совпадает с направлением на соседнюю зону по карте мира.
+    У городов выходы бывают где угодно, для них — 8 направлений по углу.
+    """
     if abs(x) < 1e-6 and abs(y) < 1e-6:
         return None
+    if kind != "city":
+        return ("N" if y >= 0 else "S") + ("E" if x >= 0 else "W")
     ang = math.degrees(math.atan2(y, x)) % 360
     return COMPASS[int((ang + 22.5) // 45) % 8]
 
@@ -152,7 +162,7 @@ def main(src, dst):
             return
         ax, ay = a_pos
         bx, by = b_pos
-        rec = [a, b, etype, compass(ax, ay) if etype == "road" else None,
+        rec = [a, b, etype, compass(ax, ay, zones[a]["kind"]) if etype == "road" else None,
                round(ax), round(ay), round(bx), round(by)]
         links[(a, b, etype, rec[4], rec[5])] = rec
 

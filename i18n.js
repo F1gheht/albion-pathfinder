@@ -2,7 +2,6 @@
 // Названия зон не переводятся: в игре они одинаковые на всех языках.
 window.I18N = {
   ru: {
-    subtitle: "Кратчайший путь между зонами с учётом опасности",
     from: "Откуда",
     to: "Куда",
     fromPh: "например, Martlock",
@@ -47,20 +46,19 @@ window.I18N = {
     exitTo: "выход",
     takePortal: "портал",
     arrive: "финиш",
-    compassNote: "Сторона выхода — как на карте зоны (север сверху).",
+    compassNote: "Сторона выхода — как на карте зоны (север сверху). У обычных зон выходы всегда по диагонали: NE, NW, SE, SW.",
     levelsJoin: " и ",
     levelName: { blue: "синие", yellow: "жёлтые", red: "красные", black: "чёрные" },
     colorName: { blue: "синяя", yellow: "жёлтая", red: "красная", black: "чёрная" },
-    dir: { N: "С", NE: "СВ", E: "В", SE: "ЮВ", S: "Ю", SW: "ЮЗ", W: "З", NW: "СЗ" },
+    dir: { N: "N", NE: "NE", E: "E", SE: "SE", S: "S", SW: "SW", W: "W", NW: "NW" },
     dirLong: {
-      N: "на север", NE: "на северо-восток", E: "на восток", SE: "на юго-восток",
-      S: "на юг", SW: "на юго-запад", W: "на запад", NW: "на северо-запад",
+      N: "north", NE: "north-east", E: "east", SE: "south-east",
+      S: "south", SW: "south-west", W: "west", NW: "north-west",
     },
     loadError: "Не удалось загрузить data/zones.json. Если вы открыли файл напрямую, запустите локальный сервер (см. README).",
   },
 
   en: {
-    subtitle: "Shortest path between zones, with a safety filter",
     from: "From",
     to: "To",
     fromPh: "e.g. Martlock",
@@ -105,7 +103,7 @@ window.I18N = {
     exitTo: "exit",
     takePortal: "portal",
     arrive: "destination",
-    compassNote: "Exit side as on the zone map (north up).",
+    compassNote: "Exit side as on the zone map (north up). Regular zones always have diagonal exits: NE, NW, SE, SW.",
     levelsJoin: " and ",
     levelName: { blue: "blue", yellow: "yellow", red: "red", black: "black" },
     colorName: { blue: "blue", yellow: "yellow", red: "red", black: "black" },
