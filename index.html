@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Albion Pathfinder</title>
   <meta name="description" content="Free shortest-path finder between Albion Online zones with a safety filter. Бесплатный поиск кратчайшего пути между зонами Albion Online.">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <header class="top">
@@ -61,6 +61,21 @@
     </section>
 
     <section class="map-wrap">
+      <div class="dng-bar">
+        <label class="toggle">
+          <input type="checkbox" id="dng-on">
+          <span class="knob" aria-hidden="true"></span>
+          <span data-i18n="dngShow"></span>
+        </label>
+        <div class="dng-opts" id="dng-opts">
+          <div class="seg tiers" id="dng-tiers" role="group" data-i18n-aria="dngTiers"></div>
+          <label class="check inline">
+            <input type="checkbox" id="dng-side" checked>
+            <span data-i18n="dngSide"></span>
+          </label>
+          <span class="muted" id="dng-count"></span>
+        </div>
+      </div>
       <svg id="map" role="img" data-i18n-aria="mapAria"></svg>
       <div class="legend">
         <span><i class="dot blue"></i><span data-i18n="cBlue"></span></span>
@@ -69,6 +84,7 @@
         <span><i class="dot black"></i><span data-i18n="cBlack"></span></span>
         <span class="hint" data-i18n="mapHint"></span>
       </div>
+      <div class="zone-info" id="zone-info" aria-live="polite"></div>
     </section>
   </main>
 
@@ -78,8 +94,8 @@
       <span data-i18n="version"></span> <span id="data-version">…</span>. <span data-i18n="notIncluded"></span></p>
   </footer>
 
-  <script src="pathfinder.js?v=4"></script>
-  <script src="i18n.js?v=4"></script>
-  <script src="app.js?v=4"></script>
+  <script src="pathfinder.js?v=5"></script>
+  <script src="i18n.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

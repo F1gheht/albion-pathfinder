@@ -10,7 +10,9 @@
     {
       "version": "...",
       "zones": [{"id", "name", "color", "tier", "x", "y", "kind"}],
-      "links": [[from, to, type, dir, ax, ay, bx, by]]
+      "links": [[from, to, type, dir, ax, ay, bx, by]],
+      "dungeons": [{"id", "name", "tier", "faction", "floors", "solo",
+                    "entrances": [[zone, main, dir]]}]
     }
 
 links — направленные переходы:
@@ -121,6 +123,57 @@ def compass(x, y, kind="zone"):
         return ("N" if y >= 0 else "S") + ("E" if x >= 0 else "W")
     ang = math.degrees(math.atan2(y, x)) % 360
     return COMPASS[int((ang + 22.5) // 45) % 8]
+
+
+FACTIONS = {"KPR": "keeper", "HER": "heretic", "UND": "undead", "MOR": "morgana"}
+
+
+def collect_dungeons(root, clusters, zones):
+    """Статические подземелья: тир, фракция, этажи и все входы.
+
+    entrances — [зона, главный ли вход (1/0), сторона света входа в зоне].
+    """
+    result = []
+    node = root.find("staticdungeons")
+    if node is None:
+        return result
+    for d in node:
+        floors = [c.get("clusterId") for c in d.iter("cluster")]
+        floors = [f for f in floors if f in clusters]
+        if not floors:
+            continue
+        first = clusters[floors[0]].el
+        tiers = [tier_from_file(clusters[f].el.get("file")) for f in floors]
+        tiers = [t for t in tiers if t]
+        faction = FACTIONS.get(floors[0].split("-")[1] if "-" in floors[0] else "", "unknown")
+
+        entrances = []
+        refs = [(d.get("mainentranceid"), 1)] + [(s.get("id"), 0) for s in d.iter("sideentrance")]
+        solo = False
+        for ref, main in refs:
+            guid, zone = split_target(ref)
+            if zone not in zones:
+                continue
+            ex = next((e for e in clusters[zone].exits() if e.get("id") == guid), None)
+            direction = None
+            if ex is not None:
+                x, y = clusters[zone].local(ex.get("pos"))
+                direction = compass(x, y, zones[zone]["kind"])
+                solo = solo or ex.get("targettype") == "DungeonSolo"
+            entrances.append([zone, main, direction])
+        if not entrances:
+            continue
+
+        result.append({
+            "id": len(result),
+            "name": first.get("displayname") or floors[0],
+            "tier": max(tiers) if tiers else None,
+            "faction": faction,
+            "floors": len(floors),
+            "solo": solo,
+            "entrances": entrances,
+        })
+    return result
 
 
 def main(src, dst):
@@ -237,11 +290,14 @@ def main(src, dst):
                 z["x"] = round(sum(p[0] for p in pts) / len(pts), 1)
                 z["y"] = round(sum(p[1] for p in pts) / len(pts), 1)
 
+    dungeons = collect_dungeons(root, clusters, zones)
+
     out = {
         "version": date.today().isoformat(),
         "source": "https://github.com/ao-data/ao-bin-dumps (cluster/world.xml)",
         "zones": sorted(zones.values(), key=lambda z: z["name"]),
         "links": sorted(links, key=lambda l: (l[0], l[1], l[2], l[4], l[5])),
+        "dungeons": dungeons,
     }
     with open(dst, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
@@ -252,6 +308,9 @@ def main(src, dst):
     print("цвета:", dict(Counter(z["color"] for z in zones.values())))
     print("типы переходов:", dict(Counter(l[2] for l in links)))
     print("односторонних пар:", len(one_way) // 2 if one_way else 0)
+    print(f"статических подземелий: {len(dungeons)}, "
+          f"зон со входами: {len({e[0] for d in dungeons for e in d['entrances']})}")
+    print("тиры:", dict(sorted(Counter(d["tier"] for d in dungeons).items())))
 
 
 if __name__ == "__main__":

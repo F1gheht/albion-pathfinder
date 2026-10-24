@@ -23,6 +23,10 @@ function dotHtml(z, title) {
   return `<i class="dot ${z.color} city-dot" style="${style}" title="${title}"></i>`;
 }
 
+// Цвета тиров, как у предметов в игре
+const TIER_COLOR = { 3: "#5fae4f", 4: "#4a86d9", 5: "#d0453a", 6: "#e8892b", 7: "#e6c63a", 8: "#f2efe8" };
+const DNG_TIERS = [3, 4, 5, 6, 7, 8];
+
 const ARROW = { N: "↑", NE: "↗", E: "→", SE: "↘", S: "↓", SW: "↙", W: "←", NW: "↖" };
 
 const state = {
@@ -33,6 +37,10 @@ const state = {
   lang: "ru",
   view: "names",       // "names" | "compass"
   pickNext: "from",
+  routeIds: null,      // зоны текущего маршрута (для затемнения меток)
+  infoZone: null,      // зона, показанная в карточке под картой
+  dByZone: new Map(),  // id зоны -> [{ d, main, dir }]
+  dng: { on: false, tiers: new Set(DNG_TIERS), side: true },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -46,11 +54,21 @@ function loadPrefs() {
   const browserRu = (navigator.language || "").toLowerCase().startsWith("ru");
   state.lang = saved.lang === "en" || saved.lang === "ru" ? saved.lang : browserRu ? "ru" : "en";
   state.view = saved.view === "compass" ? "compass" : "names";
+  if (saved.dng) {
+    state.dng.on = !!saved.dng.on;
+    state.dng.side = saved.dng.side !== false;
+    const tiers = (saved.dng.tiers || []).filter((t) => DNG_TIERS.includes(t));
+    if (tiers.length) state.dng.tiers = new Set(tiers);
+  }
 }
 
 function savePrefs() {
   try {
-    localStorage.setItem("albion-pathfinder", JSON.stringify({ lang: state.lang, view: state.view }));
+    localStorage.setItem("albion-pathfinder", JSON.stringify({
+      lang: state.lang,
+      view: state.view,
+      dng: { on: state.dng.on, side: state.dng.side, tiers: [...state.dng.tiers] },
+    }));
   } catch (_) {}
 }
 
@@ -72,6 +90,8 @@ function applyLang() {
     b.setAttribute("aria-pressed", String(b.dataset.lang === state.lang));
   });
   updateMapTitles();
+  renderDngControls();
+  renderZoneInfo();
   renderResult();
 }
 
@@ -91,6 +111,14 @@ async function load() {
     seen.add(key);
     state.pairs.push([a, b, type]);
   }
+
+  for (const d of data.dungeons || []) {
+    for (const [zid, main, dir] of d.entrances) {
+      if (!state.dByZone.has(zid)) state.dByZone.set(zid, []);
+      state.dByZone.get(zid).push({ d, main: !!main, dir });
+    }
+  }
+  for (const list of state.dByZone.values()) list.sort((a, b) => a.d.tier - b.d.tier || b.main - a.main);
 
   $("data-version").textContent = data.version;
   const names = data.zones.map((z) => z.name).sort((x, y) => x.localeCompare(y));
@@ -226,7 +254,7 @@ function renderNames(path) {
     .map((s) => {
       const z = zone(s.zone);
       const portal = s.link && s.link.type === "portal" ? `<span class="portal">${t.viaPortal}</span>` : "";
-      return `<li>${dotHtml(z, t.colorName[z.color])}${esc(z.name)} ${portal}<span class="meta">${zoneMeta(z)}</span></li>`;
+      return `<li>${dotHtml(z, t.colorName[z.color])}${esc(z.name)} ${portal}${dngBadges(z.id)}<span class="meta">${zoneMeta(z)}</span></li>`;
     })
     .join("")}</ol>`;
 }
@@ -247,7 +275,7 @@ function renderCompass(path) {
       const d = next.link.dir;
       dir = `<span class="dir" title="${t.dirLong[d]}"><b class="arrow">${ARROW[d]}</b>${t.dir[d]}</span>`;
     }
-    return `<li>${dir}<span class="zname">${dotHtml(z, t.colorName[z.color])}${esc(z.name)}</span><span class="meta">${zoneMeta(z)}</span></li>`;
+    return `<li>${dir}<span class="zname">${dotHtml(z, t.colorName[z.color])}${esc(z.name)}${dngBadges(z.id)}</span><span class="meta">${zoneMeta(z)}</span></li>`;
   });
   return `<ol class="steps compass">${rows.join("")}</ol><p class="note">${t.compassNote}</p>`;
 }
@@ -288,6 +316,123 @@ async function copyRoute() {
 
 function fmtNum(n) {
   return new Intl.NumberFormat(state.lang === "ru" ? "ru-RU" : "en-US").format(Math.round(n / 10) * 10);
+}
+
+// ---------- статические подземелья ----------
+
+// Входы в зоне, подходящие под фильтр (тиры, боковые входы)
+function dngMatches(zid) {
+  if (!state.dng.on) return [];
+  return (state.dByZone.get(zid) || []).filter(
+    (e) => state.dng.tiers.has(e.d.tier) && (e.main || state.dng.side)
+  );
+}
+
+// По одному значку на тир: залитый — есть главный вход, контурный — только боковые
+function tierGroups(entries) {
+  const m = new Map();
+  for (const e of entries) m.set(e.d.tier, (m.get(e.d.tier) || false) || e.main);
+  return [...m.entries()].sort((a, b) => a[0] - b[0]);
+}
+
+function dngTitle(e) {
+  const t = T();
+  const parts = [`T${e.d.tier} ${t.faction[e.d.faction]}`, e.main ? t.dngMain : t.dngSideOne];
+  if (e.dir) parts.push(e.dir);
+  if (e.d.solo) parts.push(t.dngSolo);
+  const fl = t.dngFloors(e.d.floors);
+  if (fl) parts.push(fl);
+  return `${e.d.name} — ${parts.join(", ")}`;
+}
+
+function dngBadges(zid) {
+  const list = dngMatches(zid);
+  if (!list.length) return "";
+  const title = esc(list.map(dngTitle).join("\n"));
+  return `<span class="dng-badges" title="${title}">${tierGroups(list)
+    .map(([tier, main]) => `<b class="tbadge${main ? "" : " side"}" style="--tc:${TIER_COLOR[tier]}">${tier}</b>`)
+    .join("")}</span>`;
+}
+
+function renderDngControls() {
+  const t = T();
+  $("dng-on").checked = state.dng.on;
+  $("dng-side").checked = state.dng.side;
+  $("dng-opts").classList.toggle("off", !state.dng.on);
+  $("dng-tiers").innerHTML = DNG_TIERS.map(
+    (tier) => `<button type="button" data-tier="${tier}" aria-pressed="${state.dng.tiers.has(tier)}" ${state.dng.on ? "" : "disabled"} style="--tc:${TIER_COLOR[tier]}">T${tier}</button>`
+  ).join("");
+  $("dng-side").disabled = !state.dng.on;
+  let count = "";
+  if (state.dng.on && state.graph) {
+    const ds = new Set(), zs = new Set();
+    for (const zid of state.graph.zones.keys()) {
+      const m = dngMatches(zid);
+      if (m.length) { zs.add(zid); m.forEach((e) => ds.add(e.d.id)); }
+    }
+    count = ds.size ? t.dngCount(ds.size, zs.size) : t.dngNone;
+  }
+  $("dng-count").textContent = count;
+}
+
+function onDngChange() {
+  savePrefs();
+  renderDngControls();
+  drawDungeonLayer();
+  updateMapTitles();
+  renderResult();
+}
+
+function drawDungeonLayer() {
+  const layer = $("dungeon-layer");
+  if (!layer) return;
+  layer.innerHTML = "";
+  if (!state.dng.on) return;
+  const onRoute = state.routeIds && state.routeIds.length > 1 ? new Set(state.routeIds) : null;
+  const S = 6, GAP = 0.8; // размер значка в единицах карты
+  for (const z of state.graph.zones.values()) {
+    const groups = tierGroups(dngMatches(z.id));
+    if (!groups.length) continue;
+    const g = el("g", { class: "dng" + (onRoute && !onRoute.has(z.id) ? " dim" : "") }, layer);
+    groups.forEach(([tier, main], i) => {
+      const x = px(z) + 3 + i * (S + GAP), y = py(z) - 3 - S;
+      el("rect", {
+        x, y, width: S, height: S, rx: 1,
+        class: "tb" + (main ? "" : " side"),
+        style: `--tc:${TIER_COLOR[tier]}`,
+        "data-id": z.id,
+      }, g);
+      const tx = el("text", { x: x + S / 2, y: y + S / 2 + 1.8, class: "tt" + (main ? "" : " side"), style: `--tc:${TIER_COLOR[tier]}`, "data-id": z.id }, g);
+      tx.textContent = tier;
+    });
+  }
+}
+
+// Карточка зоны под картой: цвет, тир и все статики (без фильтра)
+function renderZoneInfo() {
+  const box = $("zone-info");
+  if (!box) return;
+  const z = state.infoZone && state.graph ? zone(state.infoZone) : null;
+  if (!z) { box.innerHTML = ""; return; }
+  const t = T();
+  const tier = z.kind === "city" ? t.city : z.tier ? `T${z.tier}` : "";
+  const list = state.dByZone.get(z.id) || [];
+  let html = `<div class="zi-head">${dotHtml(z, t.colorName[z.color])}<b>${esc(z.name)}</b><span class="muted">${t.colorName[z.color]}${tier ? " · " + tier : ""}</span></div>`;
+  if (!list.length) {
+    html += `<div class="muted">${t.dngNoneInZone}</div>`;
+  } else {
+    html += `<div class="muted">${t.dngInZone}:</div><ul class="zi-list">${list
+      .map((e) => {
+        const extra = [e.main ? t.dngMain : t.dngSideOne];
+        if (e.dir) extra.push(`<b class="zi-dir">${ARROW[e.dir]} ${e.dir}</b>`);
+        if (e.d.solo) extra.push(t.dngSolo);
+        const fl = t.dngFloors(e.d.floors);
+        if (fl) extra.push(fl);
+        return `<li><b class="tbadge${e.main ? "" : " side"}" style="--tc:${TIER_COLOR[e.d.tier]}">${e.d.tier}</b>${esc(e.d.name)} <span class="muted">(${t.faction[e.d.faction]}) · ${extra.join(" · ")}</span></li>`;
+      })
+      .join("")}</ul>`;
+  }
+  box.innerHTML = html;
 }
 
 // ---------- ссылка на маршрут ----------
@@ -365,6 +510,7 @@ function drawMap() {
     el("title", {}, c);
   }
 
+  el("g", { id: "dungeon-layer" }, svg);
   const gLabels = el("g", {}, svg);
   for (const z of zones) {
     if (!(z.kind === "city" && z.color !== "black") && !z.name.endsWith("Portal")) continue;
@@ -377,6 +523,8 @@ function drawMap() {
     if (view.dragged) return;
     const id = e.target.getAttribute && e.target.getAttribute("data-id");
     if (!id) return;
+    state.infoZone = id;
+    renderZoneInfo();
     if (state.pickNext === "from") {
       $("from").value = zone(id).name;
       $("to").value = "";
@@ -392,6 +540,7 @@ function drawMap() {
   });
 
   enablePanZoom(svg);
+  drawDungeonLayer();
   updateMapTitles();
 }
 
@@ -401,11 +550,14 @@ function updateMapTitles() {
   document.querySelectorAll("#zone-layer .zone").forEach((c) => {
     const z = zone(c.getAttribute("data-id"));
     const tier = z.tier && z.kind !== "city" ? `, T${z.tier}` : "";
-    c.firstChild.textContent = `${z.name} — ${t.colorName[z.color]}${tier}`;
+    const dng = dngMatches(z.id).map((e) => "\n• " + dngTitle(e)).join("");
+    c.firstChild.textContent = `${z.name} — ${t.colorName[z.color]}${tier}${dng}`;
   });
 }
 
 function setRoute(ids) {
+  state.routeIds = ids;
+  drawDungeonLayer();
   const layer = $("route-layer");
   layer.innerHTML = "";
   const onRoute = new Set(ids || []);
@@ -522,9 +674,24 @@ document.querySelectorAll("input[name=safety], input[name=metric], #portals").fo
   i.addEventListener("change", () => { if ($("from").value && $("to").value) search(); })
 );
 
+$("dng-on").addEventListener("change", (e) => { state.dng.on = e.target.checked; onDngChange(); });
+$("dng-side").addEventListener("change", (e) => { state.dng.side = e.target.checked; onDngChange(); });
+$("dng-tiers").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-tier]");
+  if (!b || !state.dng.on) return;
+  const tier = Number(b.dataset.tier);
+  const tiers = state.dng.tiers;
+  // клик по единственному выбранному тиру снова включает все
+  if (tiers.has(tier) && tiers.size === 1) DNG_TIERS.forEach((x) => tiers.add(x));
+  else if (tiers.has(tier)) tiers.delete(tier);
+  else tiers.add(tier);
+  onDngChange();
+});
+
 load()
   .then(() => {
     drawMap();
+    renderDngControls();
     if (readHash()) search();
   })
   .catch(() => {
